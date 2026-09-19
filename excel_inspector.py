@@ -1128,6 +1128,16 @@ def generate_excel_report(inspector, output_path):
         cell.alignment = align_center
         cell.border = border_thin
 
+    # 표본점별 요약 정렬 (팀장 -> 팀원 -> 표본점번호)
+    def summary_sort_key(item):
+        leader = clean_str(item.get("팀장", ""))
+        member = clean_str(item.get("팀원", ""))
+        raw_pid = clean_str(item.get("표본점번호", ""))
+        pid_num = int(raw_pid) if raw_pid.isdigit() else 99999999
+        return (leader, member, pid_num, raw_pid)
+
+    inspector.file_summary.sort(key=summary_sort_key)
+
     for row_idx, item in enumerate(inspector.file_summary, 5):
         raw_pid = clean_str(item["표본점번호"])
         pid_val = int(raw_pid) if raw_pid.isdigit() else raw_pid
@@ -1178,6 +1188,19 @@ def generate_excel_report(inspector, output_path):
         cell.fill = fill_header_primary
         cell.alignment = align_center
         cell.border = border_thin
+
+    # 팀장별 오류 내역 정렬 (팀장 -> 팀원 -> 표본점번호 -> 시트명 -> 행번호)
+    def error_sort_key(item):
+        leader = clean_str(item.get("팀장", ""))
+        member = clean_str(item.get("팀원", ""))
+        raw_pid = clean_str(item.get("표본점번호", ""))
+        pid_num = int(raw_pid) if raw_pid.isdigit() else 99999999
+        sheet = clean_str(item.get("시트명", ""))
+        raw_row = str(item.get("행번호", ""))
+        row_num = int(raw_row) if raw_row.isdigit() else 99999999
+        return (leader, member, pid_num, raw_pid, sheet, row_num)
+
+    inspector.errors.sort(key=error_sort_key)
 
     for row_idx, item in enumerate(inspector.errors, 5):
         raw_err_pid = clean_str(item["표본점번호"])
