@@ -256,7 +256,7 @@ async function handleBrowseFolder() {
 async function handleStartInspection() {
   if (currentMode === 'upload') {
     if (selectedFiles.length === 0) {
-      alert('검수할 엑셀 파일을 드래그하여 놓거나 [파일 직접 선택] 버튼을 눌러주세요.\n(또는 샘플 데이터 체험 버튼을 누르면 즉시 테스트할 수 있습니다)');
+      alert('검수할 엑셀 파일을 드래그하여 놓거나 [파일 직접 선택] 또는 [폴더째 선택] 버튼을 눌러주세요.');
       return;
     }
     await executeUploadInspection();
