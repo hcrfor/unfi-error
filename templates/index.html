@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>산림 도시 조사 데이터 오류 검수 시스템</title>
-  <!-- Google Fonts (Pretendard 스타일 대안: Outfit & Noto Sans KR) -->
+  <!-- Google Fonts (Outfit & Noto Sans KR) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -17,7 +17,7 @@
       <div class="header-left">
         <div class="brand-badge">2026 UNFI Quality Assurance</div>
         <h1 class="header-title">산림 도시 조사 데이터 <span>오류 검수 시스템</span></h1>
-        <p class="header-desc">도시 조사결과표 기준 데이터 대조 및 5개 시트 18대 정밀 검증 규칙 자동 분석</p>
+        <p class="header-desc">도시 조사결과표 기준 데이터 대조 및 5개 시트 18대 정밀 검증 규칙 자동 분석 (웹 클라우드 지원)</p>
       </div>
       <div class="header-right">
         <div class="system-status-pill">
@@ -27,39 +27,87 @@
       </div>
     </header>
 
-    <!-- 1. 제어 및 폴더 선택 패널 -->
+    <!-- 1. 제어 및 파일 선택 패널 -->
     <section class="control-panel card glass-panel">
       <div class="panel-header">
         <div class="panel-title-wrap">
           <span class="step-num">STEP 1</span>
-          <h2>검수 대상 폴더 선택</h2>
+          <h2>검수 대상 파일 선택</h2>
         </div>
         <div class="ref-badge" id="refFileBadge" title="기준 엑셀 파일">
           <span class="icon">📘</span> 2026 도시 조사결과표(한성안).xlsx
         </div>
       </div>
 
-      <div class="folder-selector-box">
-        <div class="input-with-button">
-          <div class="input-icon-wrap">
-            <span class="input-icon">📂</span>
-            <input type="text" id="targetFolderInput" placeholder="검수할 엑셀 파일이 위치한 폴더 경로를 입력하거나 선택하세요" value="excel_1-4">
+      <!-- 모드 선택 탭 -->
+      <div class="mode-tabs">
+        <button type="button" class="tab-btn active" id="tabUploadMode" onclick="switchMode('upload')">
+          <span class="tab-icon">☁️</span> 웹 파일/폴더 업로드 (추천)
+        </button>
+        <button type="button" class="tab-btn" id="tabLocalMode" onclick="switchMode('local')">
+          <span class="tab-icon">💻</span> PC 로컬 경로 검수
+        </button>
+      </div>
+
+      <!-- 모드 1: 웹 파일/폴더 업로드 영역 (드래그 앤 드롭) -->
+      <div id="uploadModeSection" class="mode-content active">
+        <div class="dropzone" id="dropZone">
+          <div class="dropzone-icon">📥</div>
+          <h3 class="dropzone-title">검수할 엑셀 파일들을 여기로 드래그하세요</h3>
+          <p class="dropzone-desc">.xlsx 조사 파일들을 한 번에 여러 개 끌어다 놓거나 아래 버튼으로 선택할 수 있습니다.</p>
+          
+          <div class="dropzone-buttons">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('fileUploadInput').click()">
+              <span>📄 파일 직접 선택 (다중)</span>
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('folderUploadInput').click()">
+              <span>📁 폴더째 선택</span>
+            </button>
+            <button type="button" class="btn btn-outline" id="btnRunSample" onclick="handleRunSample()">
+              <span>🧪 샘플 데이터(excel_1-4)로 즉시 체험</span>
+            </button>
           </div>
-          <button type="button" class="btn btn-secondary" id="btnBrowseFolder">
-            <span>폴더 찾아보기</span>
-          </button>
+
+          <!-- 숨겨진 파일 입력 필드들 -->
+          <input type="file" id="fileUploadInput" multiple accept=".xlsx" style="display: none;">
+          <input type="file" id="folderUploadInput" webkitdirectory directory accept=".xlsx" style="display: none;">
         </div>
-        <div class="quick-chips">
-          <span class="chip-label">빠른 선택:</span>
-          <button type="button" class="chip-btn" onclick="setQuickFolder('excel_1-4')">기본 폴더 (excel_1-4)</button>
-          <button type="button" class="chip-btn" onclick="setQuickFolder('.')">현재 폴더 (.)</button>
+
+        <!-- 선택된 파일 현황 바 -->
+        <div class="selected-files-bar" id="selectedFilesBar" style="display: none;">
+          <div class="files-summary">
+            <span class="badge badge-primary" id="selectedFilesCount">0개 파일</span>
+            <span id="selectedFilesNames" class="files-names-preview"></span>
+          </div>
+          <button type="button" class="btn-clear-files" onclick="clearSelectedFiles()">✕ 선택 취소</button>
         </div>
       </div>
 
+      <!-- 모드 2: 로컬 경로 입력 영역 -->
+      <div id="localModeSection" class="mode-content" style="display: none;">
+        <div class="folder-selector-box">
+          <div class="input-with-button">
+            <div class="input-icon-wrap">
+              <span class="input-icon">📂</span>
+              <input type="text" id="targetFolderInput" placeholder="검수할 엑셀 파일이 위치한 폴더 경로를 입력하세요" value="excel_1-4">
+            </div>
+            <button type="button" class="btn btn-secondary" id="btnBrowseFolder">
+              <span>폴더 찾아보기</span>
+            </button>
+          </div>
+          <div class="quick-chips">
+            <span class="chip-label">빠른 선택:</span>
+            <button type="button" class="chip-btn" onclick="setQuickFolder('excel_1-4')">기본 폴더 (excel_1-4)</button>
+            <button type="button" class="chip-btn" onclick="setQuickFolder('.')">현재 폴더 (.)</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 검수 시작 버튼 -->
       <div class="action-bar">
-        <button type="button" class="btn btn-primary" id="btnStartInspection">
+        <button type="button" class="btn btn-primary btn-large" id="btnStartInspection">
           <span class="btn-icon">⚡</span>
-          <span class="btn-text">정밀 검수 시작</span>
+          <span class="btn-text">정밀 오류 검수 시작</span>
         </button>
       </div>
 
@@ -123,7 +171,9 @@
           <div>
             <h3>검수 결과 엑셀 리포트가 생성되었습니다!</h3>
             <p class="file-name-text" id="reportFileName">오류_검수_결과.xlsx</p>
-            <p style="font-size: 13px; color: #475569; margin-top: 4px;">저장 위치: <strong>내 PC > 다운로드 (Downloads)</strong></p>
+            <p style="font-size: 13px; color: var(--text-muted, #94a3b8); margin-top: 4px;">
+              결과 파일에는 <strong>[전체오류_상세내역], [표본점별_검수결과], [규칙별_발생통계]</strong>가 포함되어 있습니다.
+            </p>
           </div>
         </div>
         <div class="download-actions">
@@ -131,7 +181,7 @@
             <span>📥 엑셀 리포트 다운로드</span>
           </button>
           <button type="button" class="btn btn-outline" id="btnOpenFolder">
-            <span>📂 다운로드 폴더 열기</span>
+            <span>📂 결과 폴더 열기</span>
           </button>
         </div>
       </section>
