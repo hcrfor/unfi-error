@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary Excel lock files
+~$*.xlsx
+~$*.xls
+
+# Generated report output files
+오류_검수_결과.xlsx
+오류_분석_결과.xlsx
+*.log
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE files
+.vscode/
+.idea/

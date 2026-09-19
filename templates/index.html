@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>산림 도시 조사 데이터 오류 검수 시스템</title>
+  <!-- Google Fonts (Pretendard 스타일 대안: Outfit & Noto Sans KR) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- 헤더 영역 -->
+    <header class="main-header">
+      <div class="header-left">
+        <div class="brand-badge">2026 UNFI Quality Assurance</div>
+        <h1 class="header-title">산림 도시 조사 데이터 <span>오류 검수 시스템</span></h1>
+        <p class="header-desc">도시 조사결과표 기준 데이터 대조 및 5개 시트 18대 정밀 검증 규칙 자동 분석</p>
+      </div>
+      <div class="header-right">
+        <div class="system-status-pill">
+          <span class="status-indicator"></span>
+          <span id="systemStatusText">시스템 준비 완료</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 1. 제어 및 폴더 선택 패널 -->
+    <section class="control-panel card glass-panel">
+      <div class="panel-header">
+        <div class="panel-title-wrap">
+          <span class="step-num">STEP 1</span>
+          <h2>검수 대상 폴더 선택</h2>
+        </div>
+        <div class="ref-badge" id="refFileBadge" title="기준 엑셀 파일">
+          <span class="icon">📘</span> 2026 도시 조사결과표(한성안).xlsx
+        </div>
+      </div>
+
+      <div class="folder-selector-box">
+        <div class="input-with-button">
+          <div class="input-icon-wrap">
+            <span class="input-icon">📂</span>
+            <input type="text" id="targetFolderInput" placeholder="검수할 엑셀 파일이 위치한 폴더 경로를 입력하거나 선택하세요" value="excel_1-4">
+          </div>
+          <button type="button" class="btn btn-secondary" id="btnBrowseFolder">
+            <span>폴더 찾아보기</span>
+          </button>
+        </div>
+        <div class="quick-chips">
+          <span class="chip-label">빠른 선택:</span>
+          <button type="button" class="chip-btn" onclick="setQuickFolder('excel_1-4')">기본 폴더 (excel_1-4)</button>
+          <button type="button" class="chip-btn" onclick="setQuickFolder('.')">현재 폴더 (.)</button>
+        </div>
+      </div>
+
+      <div class="action-bar">
+        <button type="button" class="btn btn-primary" id="btnStartInspection">
+          <span class="btn-icon">⚡</span>
+          <span class="btn-text">정밀 검수 시작</span>
+        </button>
+      </div>
+
+      <!-- 실시간 진행률 프로그레스 바 -->
+      <div class="progress-wrap" id="progressWrap" style="display: none;">
+        <div class="progress-info">
+          <span class="progress-status-msg" id="progressMsg">검수를 준비하고 있습니다...</span>
+          <span class="progress-percent" id="progressPercent">0%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 결과 대시보드 영역 (검수 후 표시) -->
+    <div id="resultsSection" style="display: none;">
+      <!-- 결과 요약 지표 카드 그리드 -->
+      <section class="summary-metrics-grid">
+        <div class="metric-card card">
+          <div class="metric-icon blue">📁</div>
+          <div class="metric-content">
+            <div class="metric-label">총 검수 파일</div>
+            <div class="metric-value" id="metricTotalFiles">0</div>
+            <div class="metric-sub">검수 완료된 조사 파일 수</div>
+          </div>
+        </div>
+
+        <div class="metric-card card">
+          <div class="metric-icon green">✅</div>
+          <div class="metric-content">
+            <div class="metric-label">정상 통과 파일</div>
+            <div class="metric-value text-green" id="metricPassFiles">0</div>
+            <div class="metric-sub">오류가 발견되지 않은 파일</div>
+          </div>
+        </div>
+
+        <div class="metric-card card">
+          <div class="metric-icon red">⚠️</div>
+          <div class="metric-content">
+            <div class="metric-label">오류 발견 파일</div>
+            <div class="metric-value text-red" id="metricErrorFiles">0</div>
+            <div class="metric-sub">수정 조치가 필요한 파일</div>
+          </div>
+        </div>
+
+        <div class="metric-card card">
+          <div class="metric-icon amber">🔍</div>
+          <div class="metric-content">
+            <div class="metric-label">총 오류 건수</div>
+            <div class="metric-value text-amber" id="metricTotalErrors">0</div>
+            <div class="metric-sub">발견된 세부 오류 총계</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 결과 다운로드 및 액션 배너 -->
+      <section class="download-banner card glass-panel">
+        <div class="download-left">
+          <div class="download-icon">📊</div>
+          <div>
+            <h3>검수 결과 엑셀 리포트가 생성되었습니다!</h3>
+            <p class="file-name-text" id="reportFileName">오류_검수_결과.xlsx</p>
+            <p style="font-size: 13px; color: #475569; margin-top: 4px;">저장 위치: <strong>내 PC > 다운로드 (Downloads)</strong></p>
+          </div>
+        </div>
+        <div class="download-actions">
+          <button type="button" class="btn btn-success" id="btnDownloadReport">
+            <span>📥 엑셀 리포트 다운로드</span>
+          </button>
+          <button type="button" class="btn btn-outline" id="btnOpenFolder">
+            <span>📂 다운로드 폴더 열기</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 규칙별 발생 통계 & 표본점 요약 탭 -->
+      <div class="dashboard-grid">
+        <!-- 좌측: 규칙별 통계 카드 -->
+        <section class="card stat-card">
+          <div class="card-header">
+            <h3>📈 검증 규칙별 오류 발생 통계</h3>
+            <span class="badge" id="ruleTotalCountBadge">0개 규칙</span>
+          </div>
+          <div class="rule-stats-list" id="ruleStatsList">
+            <!-- JS 동적 생성 -->
+          </div>
+        </section>
+
+        <!-- 우측: 표본점별 판정 요약 -->
+        <section class="card sample-card">
+          <div class="card-header">
+            <h3>📑 표본점별 검수 현황 요약</h3>
+            <input type="text" id="sampleSearchInput" class="table-search-input" placeholder="표본점번호 또는 파일명 검색...">
+          </div>
+          <div class="table-scroll-wrap fixed-height">
+            <table class="data-table" id="sampleSummaryTable">
+              <thead>
+                <tr>
+                  <th style="width: 60px;">연번</th>
+                  <th>표본점번호</th>
+                  <th>파일명</th>
+                  <th style="width: 100px;">오류 건수</th>
+                  <th style="width: 110px;">검수 판정</th>
+                </tr>
+              </thead>
+              <tbody id="sampleSummaryBody">
+                <!-- JS 동적 생성 -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- 3. 상세 오류 테이블 -->
+      <section class="card table-card full-width">
+        <div class="table-card-header">
+          <div class="table-title-wrap">
+            <h3>🚨 상세 오류 내역 리스트</h3>
+            <span class="badge badge-danger" id="detailErrorCountBadge">0건</span>
+          </div>
+          <div class="table-filters">
+            <!-- 시트 필터 -->
+            <select id="sheetFilterSelect" class="filter-select">
+              <option value="ALL">모든 시트 보기</option>
+              <option value="일반·토지현황조사표">일반·토지현황조사표</option>
+              <option value="임분현황조사표">임분현황조사표</option>
+              <option value="임목조사표(임목조사)">임목조사표(임목조사)</option>
+              <option value="하층임목조사표(임목조사)">하층임목조사표(임목조사)</option>
+              <option value="하층임목조사표(군락조사)">하층임목조사표(군락조사)</option>
+            </select>
+            <!-- 통합 검색 -->
+            <input type="text" id="errorSearchInput" class="table-search-input" placeholder="오류 내용, 항목, 표본점 검색...">
+          </div>
+        </div>
+
+        <div class="table-scroll-wrap">
+          <table class="data-table" id="errorDetailTable">
+            <thead>
+              <tr>
+                <th style="width: 50px;">#</th>
+                <th style="width: 120px;">표본점번호</th>
+                <th style="width: 160px;">파일명</th>
+                <th style="width: 140px;">시트명</th>
+                <th style="width: 70px;">행</th>
+                <th style="width: 170px;">검증 규칙</th>
+                <th style="width: 130px;">오류 항목</th>
+                <th>오류 내용 및 사유</th>
+                <th style="width: 180px;">실제 입력값</th>
+              </tr>
+            </thead>
+            <tbody id="errorDetailBody">
+              <!-- JS 동적 생성 -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
