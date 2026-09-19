@@ -1117,7 +1117,7 @@ def generate_excel_report(inspector, output_path):
     ws_sum = wb.create_sheet(title="표본점별_검수요약")
     ws_sum.views.sheetView[0].showGridLines = True
 
-    ws_sum.cell(1, 1, "산림 도시 조사 데이터 검수 요약").font = font_title
+    ws_sum.cell(1, 1, "도시 산림자원조사 데이터 검수 요약").font = font_title
     ws_sum.cell(2, 1, f"검수일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 총 검수 파일: {len(inspector.file_summary)}개 | 총 오류 건수: {len(inspector.errors)}건").font = font_sub
 
     headers_sum = ["연번", "표본점번호", "파일명", "팀장", "팀원", "오류 건수", "검수 판정"]
