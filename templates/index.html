@@ -209,11 +209,13 @@
             <table class="data-table" id="sampleSummaryTable">
               <thead>
                 <tr>
-                  <th style="width: 60px;">연번</th>
+                  <th style="width: 50px;">연번</th>
                   <th>표본점번호</th>
                   <th>파일명</th>
-                  <th style="width: 100px;">오류 건수</th>
-                  <th style="width: 110px;">검수 판정</th>
+                  <th style="width: 80px;">팀장</th>
+                  <th style="width: 90px;">팀원</th>
+                  <th style="width: 80px;">오류 건수</th>
+                  <th style="width: 100px;">검수 판정</th>
                 </tr>
               </thead>
               <tbody id="sampleSummaryBody">
@@ -242,7 +244,7 @@
               <option value="하층임목조사표(군락조사)">하층임목조사표(군락조사)</option>
             </select>
             <!-- 통합 검색 -->
-            <input type="text" id="errorSearchInput" class="table-search-input" placeholder="오류 내용, 항목, 표본점 검색...">
+            <input type="text" id="errorSearchInput" class="table-search-input" placeholder="오류 내용, 항목, 표본점, 팀장 검색...">
           </div>
         </div>
 
@@ -251,14 +253,16 @@
             <thead>
               <tr>
                 <th style="width: 50px;">#</th>
-                <th style="width: 120px;">표본점번호</th>
-                <th style="width: 160px;">파일명</th>
-                <th style="width: 140px;">시트명</th>
-                <th style="width: 70px;">행</th>
-                <th style="width: 170px;">검증 규칙</th>
-                <th style="width: 130px;">오류 항목</th>
+                <th style="width: 110px;">표본점번호</th>
+                <th style="width: 150px;">파일명</th>
+                <th style="width: 80px;">팀장</th>
+                <th style="width: 90px;">팀원</th>
+                <th style="width: 130px;">시트명</th>
+                <th style="width: 60px;">행</th>
+                <th style="width: 160px;">검증 규칙</th>
+                <th style="width: 120px;">오류 항목</th>
                 <th>오류 내용 및 사유</th>
-                <th style="width: 180px;">실제 입력값</th>
+                <th style="width: 160px;">실제 입력값</th>
               </tr>
             </thead>
             <tbody id="errorDetailBody">

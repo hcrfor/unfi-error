@@ -471,6 +471,8 @@ function renderSampleTable(fileSummary) {
       <td class="cell-center">${idx + 1}</td>
       <td class="cell-code"><strong>${escapeHtml(item.표본점번호)}</strong></td>
       <td>${escapeHtml(item.파일명)}</td>
+      <td class="cell-center">${escapeHtml(item.팀장 || '-')}</td>
+      <td class="cell-center" style="font-size: 13px;">${escapeHtml(item.팀원 || '-')}</td>
       <td class="cell-right" style="font-weight: 600; color: ${isError ? '#dc2626' : '#059669'};">${item.오류건수}</td>
       <td class="cell-center">${statusBadge}</td>
     `;
@@ -502,7 +504,7 @@ function renderErrorTable(errors) {
   if (!errors || errors.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="9" style="text-align: center; padding: 36px; color: #10b981; font-weight: 600;">
+        <td colspan="11" style="text-align: center; padding: 36px; color: #10b981; font-weight: 600;">
           ✨ 완벽합니다! 발견된 상세 오류가 없습니다.
         </td>
       </tr>
@@ -518,6 +520,8 @@ function renderErrorTable(errors) {
       <td class="cell-center">${idx + 1}</td>
       <td class="cell-code">${escapeHtml(err.표본점번호)}</td>
       <td style="font-size: 13px;">${escapeHtml(err.파일명)}</td>
+      <td class="cell-center">${escapeHtml(err.팀장 || '-')}</td>
+      <td class="cell-center" style="font-size: 13px;">${escapeHtml(err.팀원 || '-')}</td>
       <td class="cell-center"><span class="badge badge-sheet">${escapeHtml(err.시트명)}</span></td>
       <td class="cell-center" style="font-family: monospace;">${escapeHtml(String(err.행번호))}</td>
       <td style="font-size: 13px; font-weight: 500;">${escapeHtml(err.검증규칙)}</td>

@@ -157,6 +157,7 @@ class ReferenceDataLoader:
     def __init__(self, ref_file_path):
         self.ref_file_path = ref_file_path
         self.sample_dict = {}  # {표본점번호: {'POINT_X': float, 'POINT_Y': float, '표고': float, ...}}
+        self.team_dict = {}    # {표본점번호: {'팀장': str, '팀원': str}}
         self.is_loaded = False
         self.load_error = None
 
@@ -209,6 +210,36 @@ class ReferenceDataLoader:
                     '표고': elev
                 }
 
+            # '조사결과표' 시트에서 팀장, 팀원 정보 캐싱
+            if '조사결과표' in wb.sheetnames:
+                try:
+                    ws_res = wb['조사결과표']
+                    res_rows = iter(ws_res.iter_rows(values_only=True))
+                    res_header = [clean_str(c) for c in next(res_rows)]
+                    pid_c = None
+                    leader_c = None
+                    member_cols = []
+                    for idx, h in enumerate(res_header):
+                        if h == '표본점번호' and pid_c is None:
+                            pid_c = idx
+                        elif h == '팀장' and leader_c is None:
+                            leader_c = idx
+                        elif h == '팀원':
+                            member_cols.append(idx)
+                    if pid_c is not None:
+                        for r in res_rows:
+                            if not r or r[pid_c] is None:
+                                continue
+                            p_str = clean_str(r[pid_c])
+                            l_str = clean_str(r[leader_c]) if leader_c is not None and leader_c < len(r) else ''
+                            m_list = [clean_str(r[c]) for c in member_cols if c < len(r) and clean_str(r[c])]
+                            self.team_dict[p_str] = {
+                                '팀장': l_str,
+                                '팀원': ', '.join(m_list)
+                            }
+                except Exception:
+                    pass
+
             wb.close()
             self.is_loaded = True
             return True
@@ -231,12 +262,16 @@ class SurveyInspector:
         self.errors = []
         self.file_summary = []
         self.rule_stats = Counter()
+        self.current_leader = ''
+        self.current_member = ''
 
-    def add_error(self, sample_no, fname, sheet, row_no, rule_name, error_field, message, detail_val):
+    def add_error(self, sample_no, fname, sheet, row_no, rule_name, error_field, message, detail_val, leader=None, member=None):
         """오류 항목을 기록합니다."""
         err_item = {
             "표본점번호": str(sample_no),
             "파일명": fname,
+            "팀장": leader if leader is not None else self.current_leader,
+            "팀원": member if member is not None else self.current_member,
             "시트명": sheet,
             "행번호": row_no if row_no is not None else '-',
             "검증규칙": rule_name,
@@ -253,6 +288,8 @@ class SurveyInspector:
         fname = os.path.basename(fpath)
         sample_no_from_fname = fname.split('_')[0]
         file_errors_before = len(self.errors)
+        self.current_leader = ''
+        self.current_member = ''
 
         try:
             wb = openpyxl.load_workbook(fpath, data_only=True)
@@ -268,6 +305,35 @@ class SurveyInspector:
                 detail_val=str(e)
             )
             return
+
+        # 0. 조사자 정보(팀장, 팀원) 추출
+        leader_name = ''
+        member_names = ''
+
+        if '일반·토지현황조사표' in wb.sheetnames:
+            ws_gen_pre = wb['일반·토지현황조사표']
+            members_list = []
+            for c in range(1, ws_gen_pre.max_column + 1):
+                col_h = clean_str(ws_gen_pre.cell(1, c).value)
+                val_r2 = clean_str(ws_gen_pre.cell(2, c).value)
+                if col_h == '팀장' and val_r2:
+                    leader_name = val_r2
+                elif col_h == '팀원' and val_r2:
+                    if val_r2 not in members_list:
+                        members_list.append(val_r2)
+            if members_list:
+                member_names = ', '.join(members_list)
+
+        # 기준 파일 fallback
+        if not leader_name or not member_names:
+            ref_team = self.ref_loader.team_dict.get(sample_no_from_fname, {})
+            if not leader_name and ref_team.get('팀장'):
+                leader_name = ref_team['팀장']
+            if not member_names and ref_team.get('팀원'):
+                member_names = ref_team['팀원']
+
+        self.current_leader = leader_name
+        self.current_member = member_names
 
         # -------------------------------------------------------------
         # 시트별 헤더 매핑 함수 (중복 열 발생 시 첫 번째 인덱스 우선 보존)
@@ -1004,6 +1070,8 @@ class SurveyInspector:
         self.file_summary.append({
             "표본점번호": sample_no,
             "파일명": fname,
+            "팀장": self.current_leader,
+            "팀원": self.current_member,
             "오류건수": file_err_count,
             "상태": "오류 발견" if file_err_count > 0 else "정상 (통과)"
         })
@@ -1052,7 +1120,7 @@ def generate_excel_report(inspector, output_path):
     ws_sum.cell(1, 1, "산림 도시 조사 데이터 검수 요약").font = font_title
     ws_sum.cell(2, 1, f"검수일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 총 검수 파일: {len(inspector.file_summary)}개 | 총 오류 건수: {len(inspector.errors)}건").font = font_sub
 
-    headers_sum = ["연번", "표본점번호", "파일명", "오류 건수", "검수 판정"]
+    headers_sum = ["연번", "표본점번호", "파일명", "팀장", "팀원", "오류 건수", "검수 판정"]
     for col_idx, h in enumerate(headers_sum, 1):
         cell = ws_sum.cell(4, col_idx, h)
         cell.font = font_header
@@ -1067,32 +1135,32 @@ def generate_excel_report(inspector, output_path):
         c1 = ws_sum.cell(row_idx, 1, row_idx - 4)
         c2 = ws_sum.cell(row_idx, 2, pid_val)
         c3 = ws_sum.cell(row_idx, 3, item["파일명"])
-        c4 = ws_sum.cell(row_idx, 4, item["오류건수"])
-        c5 = ws_sum.cell(row_idx, 5, item["상태"])
+        c4 = ws_sum.cell(row_idx, 4, item.get("팀장", ""))
+        c5 = ws_sum.cell(row_idx, 5, item.get("팀원", ""))
+        c6 = ws_sum.cell(row_idx, 6, item["오류건수"])
+        c7 = ws_sum.cell(row_idx, 7, item["상태"])
 
         if isinstance(pid_val, int):
             c2.number_format = '0'
 
-        for c in [c1, c2, c3, c4, c5]:
+        for c in [c1, c2, c3, c4, c5, c6, c7]:
             c.font = font_body
             c.border = border_thin
             c.alignment = align_center
 
         c3.alignment = align_left
-        c4.alignment = align_right
+        c6.alignment = align_right
 
         if item["오류건수"] > 0:
-            c5.fill = fill_fail
-            c5.font = Font(name="맑은 고딕", size=9, bold=True, color="991B1B")
+            c7.fill = fill_fail
+            c7.font = Font(name="맑은 고딕", size=9, bold=True, color="991B1B")
         else:
-            c5.fill = fill_pass
-            c5.font = Font(name="맑은 고딕", size=9, bold=True, color="166534")
+            c7.fill = fill_pass
+            c7.font = Font(name="맑은 고딕", size=9, bold=True, color="166534")
 
         if (row_idx % 2 == 0) and item["오류건수"] == 0:
-            c1.fill = fill_zebra
-            c2.fill = fill_zebra
-            c3.fill = fill_zebra
-            c4.fill = fill_zebra
+            for c in [c1, c2, c3, c4, c5, c6, c7]:
+                c.fill = fill_zebra
 
     # -------------------------------------------------------------
     # 시트 2: 오류_상세내역
@@ -1103,7 +1171,7 @@ def generate_excel_report(inspector, output_path):
     ws_err.cell(1, 1, "발견된 오류 상세 리스트").font = font_title
     ws_err.cell(2, 1, "각 파일 및 시트, 행별로 발생한 구체적인 오류 항목과 원인 설명입니다.").font = font_sub
 
-    headers_err = ["연번", "표본점번호", "파일명", "시트명", "행번호", "검증규칙", "오류항목", "오류내용 및 사유", "실제 입력값"]
+    headers_err = ["연번", "표본점번호", "파일명", "팀장", "팀원", "시트명", "행번호", "검증규칙", "오류항목", "오류내용 및 사유", "실제 입력값"]
     for col_idx, h in enumerate(headers_err, 1):
         cell = ws_err.cell(4, col_idx, h)
         cell.font = font_header
@@ -1118,28 +1186,31 @@ def generate_excel_report(inspector, output_path):
         c1 = ws_err.cell(row_idx, 1, row_idx - 4)
         c2 = ws_err.cell(row_idx, 2, err_pid_val)
         c3 = ws_err.cell(row_idx, 3, item["파일명"])
-        c4 = ws_err.cell(row_idx, 4, item["시트명"])
-        c5 = ws_err.cell(row_idx, 5, item["행번호"])
-        c6 = ws_err.cell(row_idx, 6, item["검증규칙"])
-        c7 = ws_err.cell(row_idx, 7, item["오류항목"])
-        c8 = ws_err.cell(row_idx, 8, item["오류내용"])
-        c9 = ws_err.cell(row_idx, 9, item["입력값_상세"])
+        c4 = ws_err.cell(row_idx, 4, item.get("팀장", ""))
+        c5 = ws_err.cell(row_idx, 5, item.get("팀원", ""))
+        c6 = ws_err.cell(row_idx, 6, item["시트명"])
+        c7 = ws_err.cell(row_idx, 7, item["행번호"])
+        c8 = ws_err.cell(row_idx, 8, item["검증규칙"])
+        c9 = ws_err.cell(row_idx, 9, item["오류항목"])
+        c10 = ws_err.cell(row_idx, 10, item["오류내용"])
+        c11 = ws_err.cell(row_idx, 11, item["입력값_상세"])
 
         if isinstance(err_pid_val, int):
             c2.number_format = '0'
 
-        for c in [c1, c2, c3, c4, c5, c6, c7, c8, c9]:
+        for c in [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11]:
             c.font = font_body
             c.border = border_thin
             c.alignment = align_center
 
         c3.alignment = align_left
-        c7.alignment = align_left
         c8.alignment = align_left
         c9.alignment = align_left
+        c10.alignment = align_left
+        c11.alignment = align_left
 
         if row_idx % 2 == 0:
-            for c in [c1, c2, c3, c4, c5, c6, c7, c8, c9]:
+            for c in [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11]:
                 c.fill = fill_zebra
 
     # -------------------------------------------------------------
