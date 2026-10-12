@@ -62,6 +62,41 @@ def is_code_match(val, target_code):
         pass
     return s == str(target_code)
 
+
+def has_defect_code(val, target_digit):
+    """
+    결함 열에 특정 숫자 코드(예: 7 또는 4)가 포함되어 있는지 안전하게 확인합니다.
+    (예: 14, 24, 4, 7, '14, 24', 14.0 등 다양한 엑셀 입력 포맷 지원)
+    """
+    if val is None:
+        return False
+    s = clean_str(val)
+    if not s:
+        return False
+    try:
+        f = float(s)
+        if f.is_integer():
+            s = str(int(f))
+    except (ValueError, TypeError):
+        pass
+    return str(target_digit) in s
+
+
+def is_stem_defect_7(val):
+    """
+    줄기·근주결함 열에 7이 포함되어 있는지 확인합니다.
+    (인위적 피해 결함 코드: 7)
+    """
+    return has_defect_code(val, 7)
+
+
+def is_branch_defect_4(val):
+    """
+    가지결함 열에 4(예: 14, 24, 4 등) 값이 포함되어 있는지 확인합니다.
+    (인위적 피해 결함 코드: 4 포함)
+    """
+    return has_defect_code(val, 4)
+
 # =============================================================
 # 덩굴류(Vines/Lianas) 수종 목록 및 판별 함수
 # 칡, 담쟁이덩굴, 노박덩굴 등 덩굴식물은 다른 수목을 타고 올라가 수고가 높게 측정될 수 있으나
@@ -163,7 +198,7 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
         file_errors = []
         
         # -------------------------------------------------------------
-        # 임목조사 결함(줄기·근주:7, 가지:14) 및 본수 사전 집계
+        # 임목조사 결함(줄기·근주: 7, 가지: 4(예: 14, 24 등)) 및 본수 사전 집계
         # -------------------------------------------------------------
         total_tree_bon = 0.0
         defect_tree_bon = 0.0
@@ -188,11 +223,11 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
 
                 raw_stem = ws_tree.cell(r, stem_c).value if stem_c else None
                 raw_branch = ws_tree.cell(r, branch_c).value if branch_c else None
-                if is_code_match(raw_stem, 7) or is_code_match(raw_branch, 14):
+                if is_stem_defect_7(raw_stem) or is_branch_defect_4(raw_branch):
                     defect_tree_bon += b_val
 
         # -------------------------------------------------------------
-        # [규칙 1 수정] 임분현황조사표 탭 '교란(인위적)' 및 임목조사 결함(7, 14) 백분율 검증
+        # [규칙 1 수정] 임분현황조사표 탭 '교란(인위적)' 및 임목조사 결함(줄기: 7, 가지: 4) 백분율 검증
         # -------------------------------------------------------------
         disturb_col = h_map_s.get('교란(인위적)')
         disturb_raw = ws_stand.cell(2, disturb_col).value if disturb_col else None
@@ -210,7 +245,7 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
                     "검증규칙": "규칙 1 (교란(인위적) 오류)",
                     "오류분류": "교란(인위적) 미입력",
                     "오류내용": (
-                        f"임목조사표(임목조사)에 결함(줄기·근주결함: 7 또는 가지결함: 14)이 있는 수목이 "
+                        f"임목조사표(임목조사)에 결함(줄기·근주결함: 7 또는 가지결함: 4(예: 14, 24 등))이 있는 수목이 "
                         f"{bon_def_fmt}본(총 {bon_tot_fmt}본 중 {expected_pct:.1f}%) "
                         f"존재하므로, 임분현황조사표의 '교란(인위적)' 열에 해당 백분율 값이 반드시 입력되어야 합니다."
                     ),
@@ -242,7 +277,7 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
                             "오류분류": "교란(인위적) 백분율 불일치",
                             "오류내용": (
                                 f"임분현황조사표의 '교란(인위적)' 값({disturb_num:.1f}%)이 "
-                                f"임목조사 결함(줄기·근주:7, 가지:14) 본수 비율({expected_pct:.1f}%, "
+                                f"임목조사 결함(줄기·근주: 7, 가지: 4(예: 14, 24 등)) 본수 비율({expected_pct:.1f}%, "
                                 f"결함 {bon_def_fmt}본 / 총 {bon_tot_fmt}본)과 일치하지 않습니다."
                             ),
                             "상세정보": f"입력값: {disturb_raw}, 기대값: {expected_pct:.1f}% ({bon_def_fmt}/{bon_tot_fmt}본)"
@@ -256,7 +291,7 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
                     "검증규칙": "규칙 1 (교란(인위적) 오류)",
                     "오류분류": "교란(인위적) 불필요 기재",
                     "오류내용": (
-                        f"임목조사표(임목조사)에 결함(줄기·근주결함: 7 또는 가지결함: 14) 수목이 없으므로(0본), "
+                        f"임목조사표(임목조사)에 결함(줄기·근주결함: 7 또는 가지결함: 4(예: 14, 24 등)) 수목이 없으므로(0본), "
                         f"임분현황조사표의 '교란(인위적)' 열은 반드시 빈 칸(미입력)이어야 합니다."
                     ),
                     "상세정보": f"입력값: {disturb_raw}"
