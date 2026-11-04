@@ -44,6 +44,21 @@ def to_float(val):
     except (ValueError, TypeError):
         return None
 
+
+def is_empty_or_zero(val):
+    """
+    빈 칸(미입력)이거나 숫자 0(예: 0, 0.0, '0', '0%')인지 안전하게 확인합니다.
+    교란(산불, 병해충, 기상, 인위적, 덩굴, 기타) 열에 0 값이 입력된 경우에도
+    오류가 아닌 정상으로 처리하기 위해 사용합니다.
+    """
+    s = clean_str(val)
+    if not s:
+        return True
+    num = to_float(val)
+    if num is not None and abs(num) < 1e-9:
+        return True
+    return False
+
 def is_code_match(val, target_code):
     """
     결함 코드(예: 7 또는 14)와 일치하는지 안전하게 확인합니다.
@@ -84,10 +99,18 @@ def has_defect_code(val, target_digit):
 
 def is_stem_defect_7(val):
     """
-    줄기·근주결함 열에 7이 포함되어 있는지 확인합니다.
-    (인위적 피해 결함 코드: 7)
+    줄기·근주결함 열에 7(예: 7, 47 등)이 포함되어 있는지 확인합니다.
+    (인위적 피해 결함 코드: 7 포함)
     """
     return has_defect_code(val, 7)
+
+
+def is_stem_defect_8(val):
+    """
+    줄기·근주결함 열에 8(예: 8, 18, 28, 48 등)이 포함되어 있는지 확인합니다.
+    (덩굴 피해 결함 코드: 8 포함)
+    """
+    return has_defect_code(val, 8)
 
 
 def is_branch_defect_4(val):
@@ -198,10 +221,11 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
         file_errors = []
         
         # -------------------------------------------------------------
-        # 임목조사 결함(줄기·근주: 7, 가지: 4(예: 14, 24 등)) 및 본수 사전 집계
+        # 임목조사 결함(줄기·근주: 7/8, 가지: 4(예: 14, 24 등)) 및 본수 사전 집계
         # -------------------------------------------------------------
         total_tree_bon = 0.0
         defect_tree_bon = 0.0
+        vine_defect_bon = 0.0
         if '임목조사표(임목조사)' in wb.sheetnames:
             ws_tree = wb['임목조사표(임목조사)']
             h_tree = {clean_str(ws_tree.cell(1, c).value): c for c in range(1, ws_tree.max_column + 1)}
@@ -225,10 +249,34 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
                 raw_branch = ws_tree.cell(r, branch_c).value if branch_c else None
                 if is_stem_defect_7(raw_stem) or is_branch_defect_4(raw_branch):
                     defect_tree_bon += b_val
+                if is_stem_defect_8(raw_stem):
+                    vine_defect_bon += b_val
 
         # -------------------------------------------------------------
-        # [규칙 1 수정] 임분현황조사표 탭 '교란(인위적)' 및 임목조사 결함(줄기: 7, 가지: 4) 백분율 검증
+        # [규칙 1 수정] 임분현황조사표 탭 교란 6개 항목(산불, 병해충, 기상, 인위적, 덩굴, 기타) 0값 허용 및
+        # '교란(인위적)' / '교란(덩굴)' - 임목조사 결함 백분율 검증
         # -------------------------------------------------------------
+        disturb_cols_all = [
+            '교란(산불)', '교란(병해충)', '교란(기상)',
+            '교란(인위적)', '교란(덩굴)', '교란(기타)'
+        ]
+        for d_col_name in disturb_cols_all:
+            if d_col_name in ('교란(인위적)', '교란(덩굴)'):
+                continue
+            d_col_idx = h_map_s.get(d_col_name)
+            d_raw_val = ws_stand.cell(2, d_col_idx).value if d_col_idx else None
+            if not is_empty_or_zero(d_raw_val):
+                if to_float(d_raw_val) is None:
+                    file_errors.append({
+                        "표본점번호": sample_no,
+                        "파일명": fname,
+                        "검증규칙": "규칙 1 (교란(인위적) 오류)",
+                        "오류분류": f"{d_col_name} 형식 오류",
+                        "오류내용": f"임분현황조사표의 '{d_col_name}' 열에 숫자가 아닌 값('{clean_str(d_raw_val)}')이 입력되었습니다.",
+                        "상세정보": f"입력값: {d_raw_val}"
+                    })
+                    rule_stats["규칙 1 (교란(인위적) 오류)"] += 1
+
         disturb_col = h_map_s.get('교란(인위적)')
         disturb_raw = ws_stand.cell(2, disturb_col).value if disturb_col else None
         disturb_str = clean_str(disturb_raw)
@@ -238,7 +286,7 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
             bon_def_fmt = int(defect_tree_bon) if defect_tree_bon.is_integer() else f"{defect_tree_bon:.1f}"
             bon_tot_fmt = int(total_tree_bon) if total_tree_bon.is_integer() else f"{total_tree_bon:.1f}"
 
-            if not disturb_str:
+            if is_empty_or_zero(disturb_raw):
                 file_errors.append({
                     "표본점번호": sample_no,
                     "파일명": fname,
@@ -249,7 +297,7 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
                         f"{bon_def_fmt}본(총 {bon_tot_fmt}본 중 {expected_pct:.1f}%) "
                         f"존재하므로, 임분현황조사표의 '교란(인위적)' 열에 해당 백분율 값이 반드시 입력되어야 합니다."
                     ),
-                    "상세정보": "입력값: 빈 값(None)"
+                    "상세정보": f"입력값: {disturb_raw}"
                 })
                 rule_stats["규칙 1 (교란(인위적) 오류)"] += 1
             else:
@@ -284,7 +332,7 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
                         })
                         rule_stats["규칙 1 (교란(인위적) 오류)"] += 1
         else:
-            if disturb_str:
+            if not is_empty_or_zero(disturb_raw):
                 file_errors.append({
                     "표본점번호": sample_no,
                     "파일명": fname,
@@ -292,9 +340,79 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
                     "오류분류": "교란(인위적) 불필요 기재",
                     "오류내용": (
                         f"임목조사표(임목조사)에 결함(줄기·근주결함: 7 또는 가지결함: 4(예: 14, 24 등)) 수목이 없으므로(0본), "
-                        f"임분현황조사표의 '교란(인위적)' 열은 반드시 빈 칸(미입력)이어야 합니다."
+                        f"임분현황조사표의 '교란(인위적)' 열은 빈 칸(미입력) 또는 0이어야 합니다."
                     ),
                     "상세정보": f"입력값: {disturb_raw}"
+                })
+                rule_stats["규칙 1 (교란(인위적) 오류)"] += 1
+
+        # 교란(덩굴) 검증 (줄기·근주결함: 8(예: 8, 48 등))
+        vine_disturb_col = h_map_s.get('교란(덩굴)')
+        vine_disturb_raw = ws_stand.cell(2, vine_disturb_col).value if vine_disturb_col else None
+        vine_disturb_str = clean_str(vine_disturb_raw)
+
+        if vine_defect_bon > 0:
+            expected_vine_pct = (vine_defect_bon / total_tree_bon * 100.0) if total_tree_bon > 0 else 0.0
+            bon_v_fmt = int(vine_defect_bon) if vine_defect_bon.is_integer() else f"{vine_defect_bon:.1f}"
+            bon_tot_fmt = int(total_tree_bon) if total_tree_bon.is_integer() else f"{total_tree_bon:.1f}"
+
+            if is_empty_or_zero(vine_disturb_raw):
+                file_errors.append({
+                    "표본점번호": sample_no,
+                    "파일명": fname,
+                    "검증규칙": "규칙 1 (교란(인위적) 오류)",
+                    "오류분류": "교란(덩굴) 미입력",
+                    "오류내용": (
+                        f"임목조사표(임목조사)에 줄기·근주결함 8(덩굴 피해, 예: 8, 48 등)이 있는 수목이 "
+                        f"{bon_v_fmt}본(총 {bon_tot_fmt}본 중 {expected_vine_pct:.1f}%) "
+                        f"존재하므로, 임분현황조사표의 '교란(덩굴)' 열에 해당 백분율 값이 반드시 입력되어야 합니다."
+                    ),
+                    "상세정보": f"입력값: {vine_disturb_raw}"
+                })
+                rule_stats["규칙 1 (교란(인위적) 오류)"] += 1
+            else:
+                vine_disturb_num = to_float(vine_disturb_raw)
+                if vine_disturb_num is None:
+                    file_errors.append({
+                        "표본점번호": sample_no,
+                        "파일명": fname,
+                        "검증규칙": "규칙 1 (교란(인위적) 오류)",
+                        "오류분류": "교란(덩굴) 형식 오류",
+                        "오류내용": f"임분현황조사표의 '교란(덩굴)' 열에 숫자가 아닌 값('{vine_disturb_str}')이 입력되었습니다.",
+                        "상세정보": f"입력값: {vine_disturb_raw}"
+                    })
+                    rule_stats["규칙 1 (교란(인위적) 오류)"] += 1
+                else:
+                    v_matches_round1 = (round(vine_disturb_num, 1) == round(expected_vine_pct, 1))
+                    v_matches_int = (round(vine_disturb_num) == round(expected_vine_pct))
+                    v_matches_margin = (abs(vine_disturb_num - expected_vine_pct) <= 0.5)
+
+                    if not (v_matches_round1 or v_matches_int or v_matches_margin):
+                        file_errors.append({
+                            "표본점번호": sample_no,
+                            "파일명": fname,
+                            "검증규칙": "규칙 1 (교란(인위적) 오류)",
+                            "오류분류": "교란(덩굴) 백분율 불일치",
+                            "오류내용": (
+                                f"임분현황조사표의 '교란(덩굴)' 값({vine_disturb_num:.1f}%)이 "
+                                f"임목조사 줄기·근주결함 8(덩굴 피해) 본수 비율({expected_vine_pct:.1f}%, "
+                                f"결함 {bon_v_fmt}본 / 총 {bon_tot_fmt}본)과 일치하지 않습니다."
+                            ),
+                            "상세정보": f"입력값: {vine_disturb_raw}, 기대값: {expected_vine_pct:.1f}% ({bon_v_fmt}/{bon_tot_fmt}본)"
+                        })
+                        rule_stats["규칙 1 (교란(인위적) 오류)"] += 1
+        else:
+            if not is_empty_or_zero(vine_disturb_raw):
+                file_errors.append({
+                    "표본점번호": sample_no,
+                    "파일명": fname,
+                    "검증규칙": "규칙 1 (교란(인위적) 오류)",
+                    "오류분류": "교란(덩굴) 불필요 기재",
+                    "오류내용": (
+                        f"임목조사표(임목조사)에 줄기·근주결함 8(덩굴 피해) 수목이 없으므로(0본), "
+                        f"임분현황조사표의 '교란(덩굴)' 열은 빈 칸(미입력) 또는 0이어야 합니다."
+                    ),
+                    "상세정보": f"입력값: {vine_disturb_raw}"
                 })
                 rule_stats["규칙 1 (교란(인위적) 오류)"] += 1
             
