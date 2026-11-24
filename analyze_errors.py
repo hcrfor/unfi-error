@@ -570,13 +570,13 @@ def analyze_excel_files(target_dir='excel_1-4', output_file='오류_분석_결�
                 
             if cov_candidates:
                 expected_max_cov = max(cov_candidates)
-                if round(tot_cov_num, 1) != round(expected_max_cov, 1):
+                if round(tot_cov_num, 1) < round(expected_max_cov, 1):
                     file_errors.append({
                         "표본점번호": sample_no,
                         "파일명": fname,
                         "검증규칙": "규칙 3 (피도 누락 및 불일치)",
-                        "오류분류": "전체피도 불일치",
-                        "오류내용": f"전체피도({tot_cov_num}%)는 각 층의 피도 중 최댓값인 {expected_max_cov}%와 같아야 하지만 다른 값이 입력되어 있습니다.",
+                        "오류분류": "전체피도 부족",
+                        "오류내용": f"전체피도({tot_cov_num}%)는 각 층의 피도 중 최댓값인 {expected_max_cov}%보다 크거나 같아야 합니다.",
                         "상세정보": f"입력 전체피도={tot_cov_num}%, 상층={top_cov_num}%, 중층={mid_cov_num}%, 하층={bot_cov_num}% -> 최댓값={expected_max_cov}%"
                     })
                     rule_stats["규칙 3 (피도 누락 및 불일치)"] += 1

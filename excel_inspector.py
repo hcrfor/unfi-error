@@ -969,6 +969,57 @@ class SurveyInspector:
                         detail_val=sp_clean
                     )
 
+            # [규칙 2-9] 임분현황 중층 비정상 기재 조합 검증
+            # - 1) 중층(종명, 피도, 범위)에만 값이 입력된 경우 오류
+            # - 2) 상층(범위) + 중층(종명, 피도, 범위)에만 값이 입력된 경우 오류
+            # - 3) 상층 없이 중층(종명, 피도, 범위) + 하층(종명, 피도, 범위)만 입력된 경우 오류
+            def _has_val(v):
+                s = clean_str(v)
+                return bool(s and s not in ('~', '-'))
+
+            mid_sp_raw = ws_stand.cell(2, h_stand.get('중층(종명)')).value if h_stand.get('중층(종명)') else None
+            mid_cov_raw = ws_stand.cell(2, h_stand.get('중층피도(퍼센트)')).value if h_stand.get('중층피도(퍼센트)') else None
+            mid_rng_raw = ws_stand.cell(2, h_stand.get('중층(범위)')).value if h_stand.get('중층(범위)') else None
+
+            has_top_sp = _has_val(top_sp_raw)
+            has_top_cov = (to_float(top_cov_raw) is not None)
+            has_top_rng = _has_val(top_rng_raw)
+            has_top_any = (has_top_sp or has_top_cov or has_top_rng)
+
+            has_mid_all = (_has_val(mid_sp_raw) and (to_float(mid_cov_raw) is not None) and _has_val(mid_rng_raw))
+
+            has_bot_sp = _has_val(bot_sp_raw)
+            has_bot_cov = (to_float(bot_cov_raw) is not None)
+            has_bot_rng = _has_val(bot_rng_raw)
+            has_bot_any = (has_bot_sp or has_bot_cov or has_bot_rng)
+            has_bot_all_strict = (has_bot_sp and has_bot_cov and has_bot_rng)
+
+            if has_mid_all:
+                if not has_top_any and not has_bot_any:
+                    self.add_error(
+                        sample_no=sample_no, fname=fname, sheet="임분현황조사표", row_no=2,
+                        rule_name="[임분현황 9] 중층 단독 기재 오류",
+                        error_field="중층(종명/피도/범위)",
+                        message="상층과 하층 없이 중층(종명, 중층피도, 중층범위)에만 값이 입력되어 있습니다.",
+                        detail_val=f"중층(종명)='{clean_str(mid_sp_raw)}', 중층피도='{clean_str(mid_cov_raw)}', 중층(범위)='{clean_str(mid_rng_raw)}'"
+                    )
+                elif has_top_rng and not has_top_sp and not has_top_cov and not has_bot_any:
+                    self.add_error(
+                        sample_no=sample_no, fname=fname, sheet="임분현황조사표", row_no=2,
+                        rule_name="[임분현황 9] 상층(범위)·중층만 기재 오류",
+                        error_field="상층(범위), 중층",
+                        message="상층(종명/피도)과 하층 없이 상층(범위)과 중층(종명, 중층피도, 중층범위)만 입력되어 있습니다.",
+                        detail_val=f"상층(범위)='{clean_str(top_rng_raw)}', 중층(종명)='{clean_str(mid_sp_raw)}', 중층피도='{clean_str(mid_cov_raw)}', 중층(범위)='{clean_str(mid_rng_raw)}'"
+                    )
+                elif not has_top_any and has_bot_all_strict:
+                    self.add_error(
+                        sample_no=sample_no, fname=fname, sheet="임분현황조사표", row_no=2,
+                        rule_name="[임분현황 9] 상층 누락 중층·하층 기재 오류",
+                        error_field="중층, 하층",
+                        message="상층 없이 중층(종명, 중층피도, 중층범위)과 하층(종명, 하층피도, 하층범위)이 입력되어 있습니다.",
+                        detail_val=f"중층(종명)='{clean_str(mid_sp_raw)}', 하층(종명)='{clean_str(bot_sp_raw)}'"
+                    )
+
             # ---------------------------------------------------------
             # [규칙 1 수정] 교란 6개 항목(산불, 병해충, 기상, 인위적, 덩굴, 기타) 0값 허용 및
             # 교란(인위적) / 교란(덩굴) - 임목조사 결함 백분율 검증
@@ -1125,7 +1176,7 @@ class SurveyInspector:
                         detail_val=vine_disturb_raw
                     )
 
-            # 전체피도 최댓값 일치 검증
+            # 전체피도 최댓값 이상 검증 (각 층의 피도 중 최댓값보다 크거나 같아야 함)
             top_cov_num = to_float(top_cov_raw)
             mid_cov_num = to_float(ws_stand.cell(2, h_stand.get('중층피도(퍼센트)')).value if h_stand.get('중층피도(퍼센트)') else None)
             bot_cov_num = to_float(bot_cov_raw)
@@ -1134,12 +1185,12 @@ class SurveyInspector:
             cov_candidates = [c for c in [top_cov_num, mid_cov_num, bot_cov_num] if c is not None]
             if cov_candidates and tot_cov_num is not None:
                 exp_max = max(cov_candidates)
-                if round(tot_cov_num, 1) != round(exp_max, 1):
+                if round(tot_cov_num, 1) < round(exp_max, 1):
                     self.add_error(
                         sample_no=sample_no, fname=fname, sheet="임분현황조사표", row_no=2,
-                        rule_name="[임분현황 기존] 전체피도 불일치",
+                        rule_name="[임분현황 기존] 전체피도 부족 오류",
                         error_field="전체피도(퍼센트)",
-                        message=f"전체피도({tot_cov_num:.1f}%)는 각 층의 피도 중 최댓값인 {exp_max:.1f}%와 같아야 합니다.",
+                        message=f"전체피도({tot_cov_num:.1f}%)는 각 층의 피도 중 최댓값인 {exp_max:.1f}%보다 크거나 같아야 합니다.",
                         detail_val=f"입력 전체피도={tot_cov_num}%, 상층={top_cov_num}%, 중층={mid_cov_num}%, 하층={bot_cov_num}%"
                     )
 
