@@ -10,6 +10,7 @@
 """
 
 import os
+import io
 import glob
 import re
 import math
@@ -324,6 +325,34 @@ class ReferenceDataLoader:
         except Exception as e:
             self.load_error = f"기준 파일 읽기 중 오류 발생: {str(e)}"
             return False
+
+
+# 서버리스/배치 검수 시 기준 엑셀 파일 반복 로딩 방지를 위한 전역 캐시
+_REF_LOADER_CACHE = {}
+
+
+def get_cached_ref_loader(ref_file="2026 도시 조사결과표(한성안).xlsx"):
+    """
+    기준 엑셀 파일 로더를 메모리에 캐싱하여 반환합니다.
+    (대량 배치 검수 시 매 요청마다 기준 파일을 다시 파싱하는 오버헤드를 제거합니다.)
+    """
+    resolved_path = ref_file
+    if not os.path.isabs(resolved_path):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        cand_path = os.path.join(base_dir, resolved_path)
+        if os.path.exists(cand_path):
+            resolved_path = cand_path
+
+    cached = _REF_LOADER_CACHE.get(resolved_path)
+    if cached and cached.is_loaded:
+        return cached
+
+    loader = ReferenceDataLoader(resolved_path)
+    if not loader.load():
+        raise RuntimeError(f"기준 데이터 로드 실패: {loader.load_error}")
+
+    _REF_LOADER_CACHE[resolved_path] = loader
+    return loader
 
 
 # =============================================================================
@@ -1333,10 +1362,15 @@ class SurveyInspector:
 # 4. 검수 결과 엑셀 리포트 생성기
 # =============================================================
 
-def generate_excel_report(inspector, output_path):
+def build_excel_report_workbook(file_summary, errors, rule_stats):
     """
-    검수 결과를 시각적으로 아름답게 정리된 엑셀 보고서로 생성합니다.
+    검수 결과 데이터(요약, 상세 오류, 규칙 통계)를 바탕으로
+    시각적으로 정리된 openpyxl Workbook 객체를 생성합니다.
     """
+    file_summary = list(file_summary or [])
+    errors = list(errors or [])
+    stats_counter = Counter(rule_stats or {})
+
     wb = openpyxl.Workbook()
     default_sheet = wb.active
 
@@ -1370,7 +1404,7 @@ def generate_excel_report(inspector, output_path):
     ws_sum.views.sheetView[0].showGridLines = True
 
     ws_sum.cell(1, 1, "도시 산림자원조사 데이터 검수 요약").font = font_title
-    ws_sum.cell(2, 1, f"검수일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 총 검수 파일: {len(inspector.file_summary)}개 | 총 오류 건수: {len(inspector.errors)}건").font = font_sub
+    ws_sum.cell(2, 1, f"검수일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 총 검수 파일: {len(file_summary)}개 | 총 오류 건수: {len(errors)}건").font = font_sub
 
     headers_sum = ["연번", "표본점번호", "파일명", "팀장", "팀원", "오류 건수", "검수 판정"]
     for col_idx, h in enumerate(headers_sum, 1):
@@ -1388,9 +1422,9 @@ def generate_excel_report(inspector, output_path):
         pid_num = int(raw_pid) if raw_pid.isdigit() else 99999999
         return (leader, member, pid_num, raw_pid)
 
-    inspector.file_summary.sort(key=summary_sort_key)
+    file_summary.sort(key=summary_sort_key)
 
-    for row_idx, item in enumerate(inspector.file_summary, 5):
+    for row_idx, item in enumerate(file_summary, 5):
         raw_pid = clean_str(item["표본점번호"])
         pid_val = int(raw_pid) if raw_pid.isdigit() else raw_pid
 
@@ -1452,9 +1486,9 @@ def generate_excel_report(inspector, output_path):
         row_num = int(raw_row) if raw_row.isdigit() else 99999999
         return (leader, member, pid_num, raw_pid, sheet, row_num)
 
-    inspector.errors.sort(key=error_sort_key)
+    errors.sort(key=error_sort_key)
 
-    for row_idx, item in enumerate(inspector.errors, 5):
+    for row_idx, item in enumerate(errors, 5):
         raw_err_pid = clean_str(item["표본점번호"])
         err_pid_val = int(raw_err_pid) if raw_err_pid.isdigit() else raw_err_pid
 
@@ -1505,8 +1539,8 @@ def generate_excel_report(inspector, output_path):
         cell.alignment = align_center
         cell.border = border_thin
 
-    total_err_count = max(len(inspector.errors), 1)
-    sorted_stats = inspector.rule_stats.most_common()
+    total_err_count = max(len(errors), 1)
+    sorted_stats = stats_counter.most_common()
 
     for row_idx, (rule_name, count) in enumerate(sorted_stats, 5):
         ratio = (count / total_err_count) * 100.0
@@ -1540,8 +1574,52 @@ def generate_excel_report(inspector, output_path):
                     max_len = byte_len
             sheet.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
+    return wb
+
+
+def generate_excel_report(inspector, output_path):
+    """검수 결과를 지정된 경로의 엑셀 파일로 저장합니다."""
+    wb = build_excel_report_workbook(
+        inspector.file_summary,
+        inspector.errors,
+        inspector.rule_stats
+    )
     wb.save(output_path)
     return output_path
+
+
+def build_excel_report_bytes(file_summary, errors, rule_stats):
+    """
+    취합된 검수 결과 데이터를 메모리 버퍼(BytesIO)에 엑셀 파일로 생성하여 반환합니다.
+    (서버리스 환경에서 파일 저장소 공유 없이 즉시 다운로드 응답을 만들기 위해 사용)
+    """
+    wb = build_excel_report_workbook(file_summary, errors, rule_stats)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def inspect_files_batch(file_paths, ref_file="2026 도시 조사결과표(한성안).xlsx"):
+    """
+    전달받은 파일 경로 목록만 빠르게 검수하여 JSON 직렬화 가능한 결과를 반환합니다.
+    (대용량 분할 업로드/배치 검수 전용)
+    """
+    ref_loader = get_cached_ref_loader(ref_file)
+    inspector = SurveyInspector(ref_loader)
+
+    for fpath in file_paths:
+        inspector.inspect_file(fpath)
+
+    return {
+        "total_files": len(file_paths),
+        "error_files": sum(1 for item in inspector.file_summary if item["오류건수"] > 0),
+        "pass_files": sum(1 for item in inspector.file_summary if item["오류건수"] == 0),
+        "total_errors": len(inspector.errors),
+        "file_summary": inspector.file_summary,
+        "rule_stats": dict(inspector.rule_stats),
+        "errors": inspector.errors
+    }
 
 
 # =============================================================

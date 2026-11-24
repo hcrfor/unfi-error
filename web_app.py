@@ -13,9 +13,13 @@
 import os
 import sys
 import uuid
+import gzip
+import json
+import shutil
 import tempfile
 import threading
 import webbrowser
+from datetime import datetime
 from werkzeug.utils import secure_filename
 
 # 윈도우 콘솔 UTF-8 출력 호환성 설정
@@ -105,6 +109,79 @@ def upload_and_inspect():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": f"검수 처리 중 오류 발생: {str(e)}"}), 500
+
+
+@app.route('/api/inspect-batch', methods=['POST'])
+def inspect_batch():
+    """
+    [대용량 분할 업로드 지원]
+    Vercel 서버리스 요청 크기(4.5MB) 및 실행 시간 제한을 회피하기 위해
+    클라이언트가 소량(배치) 단위로 나누어 보낸 엑셀 파일들을 검수하고 JSON 결과를 반환합니다.
+    """
+    uploaded_files = request.files.getlist('files')
+    if not uploaded_files:
+        return jsonify({"success": False, "error": "업로드된 엑셀 파일이 없습니다."}), 400
+
+    session_id = uuid.uuid4().hex[:10]
+    temp_dir = os.path.join(tempfile.gettempdir(), f"unfi_batch_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    saved_paths = []
+    try:
+        for f in uploaded_files:
+            if not f.filename:
+                continue
+            fname = os.path.basename(f.filename)
+            if fname.lower().endswith('.xlsx') and not fname.startswith('~$') and '오류_검수_결과' not in fname:
+                save_path = os.path.join(temp_dir, fname)
+                f.save(save_path)
+                saved_paths.append(save_path)
+
+        if not saved_paths:
+            return jsonify({"success": False, "error": "유효한 .xlsx 엑셀 파일이 없습니다."}), 400
+
+        result = excel_inspector.inspect_files_batch(saved_paths, ref_file=REF_EXCEL_FILE)
+        return jsonify({"success": True, "data": result})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"배치 검수 처리 중 오류 발생: {str(e)}"}), 500
+    finally:
+        # 서버리스 /tmp 공간 절약을 위해 배치 임시 파일 즉시 정리
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@app.route('/api/generate-report', methods=['POST'])
+def generate_report():
+    """
+    [무상태 서버리스 리포트 생성]
+    프론트엔드가 모든 배치 결과를 취합해 보낸 JSON(또는 gzip 압축 JSON)을 바탕으로
+    통합 엑셀 리포트(.xlsx)를 메모리에서 생성하여 즉시 다운로드 응답으로 반환합니다.
+    """
+    try:
+        raw_body = request.get_data()
+        if request.headers.get('Content-Encoding', '').lower() == 'gzip':
+            raw_body = gzip.decompress(raw_body)
+
+        payload = json.loads(raw_body.decode('utf-8')) if raw_body else {}
+        file_summary = payload.get('file_summary', [])
+        errors = payload.get('errors', [])
+        rule_stats = payload.get('rule_stats', {})
+
+        buf = excel_inspector.build_excel_report_bytes(file_summary, errors, rule_stats)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        report_filename = f"오류_검수_결과_{timestamp}.xlsx"
+
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=report_filename,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"엑셀 리포트 생성 중 오류 발생: {str(e)}"}), 500
 
 
 @app.route('/api/sample-inspection', methods=['POST'])

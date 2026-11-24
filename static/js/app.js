@@ -46,8 +46,11 @@ function initEventListeners() {
 
   // 3. 엑셀 리포트 다운로드
   if (btnDownload) {
-    btnDownload.addEventListener('click', () => {
-      if (currentInspectionData && currentInspectionData.report_filename) {
+    btnDownload.addEventListener('click', async () => {
+      if (!currentInspectionData) return;
+      if (currentInspectionData.is_batch_result) {
+        await downloadBatchExcelReport(currentInspectionData);
+      } else if (currentInspectionData.report_filename) {
         const folder = currentInspectionData.output_dir || '';
         const filename = encodeURIComponent(currentInspectionData.report_filename);
         window.location.href = `/api/download-report?folder=${encodeURIComponent(folder)}&filename=${filename}`;
@@ -266,7 +269,117 @@ async function handleStartInspection() {
 }
 
 /**
- * 웹 파일 업로드 검수 실행
+ * 응답을 안전하게 JSON으로 파싱 (413, 504 등 텍스트/HTML 에러 응답 방어)
+ */
+async function parseJsonResponseSafely(res) {
+  const rawText = await res.text();
+  try {
+    return JSON.parse(rawText);
+  } catch (e) {
+    if (res.status === 413 || rawText.includes('Request Entity Too Large')) {
+      throw new Error('업로드 요청 크기가 서버 허용 한도(4.5MB)를 초과했습니다. 파일 분할 크기를 줄여 다시 시도해 주세요.');
+    }
+    if (res.status === 504 || rawText.includes('TIMEOUT')) {
+      throw new Error('서버 처리 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.');
+    }
+    const preview = rawText ? rawText.slice(0, 120) : `HTTP ${res.status}`;
+    throw new Error(`서버 응답을 해석할 수 없습니다 (${res.status}): ${preview}`);
+  }
+}
+
+/**
+ * 대량 파일을 서버리스 제한(4.5MB / 타임아웃)에 걸리지 않도록 안전한 배치 단위로 분할
+ */
+function splitFilesIntoBatches(files, maxBatchBytes = 2 * 1024 * 1024, maxBatchCount = 25) {
+  const batches = [];
+  let currentBatch = [];
+  let currentBytes = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const fileSize = file.size || 0;
+
+    if (
+      currentBatch.length > 0 &&
+      (currentBatch.length >= maxBatchCount || currentBytes + fileSize > maxBatchBytes)
+    ) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBytes = 0;
+    }
+
+    currentBatch.push(file);
+    currentBytes += fileSize;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
+}
+
+/**
+ * 취합된 배치 검수 결과를 서버로 전송하여 통합 엑셀 리포트(.xlsx) 다운로드
+ */
+async function downloadBatchExcelReport(data) {
+  const btnDownload = document.getElementById('btnDownloadReport');
+  const originalHtml = btnDownload ? btnDownload.innerHTML : '';
+  if (btnDownload) {
+    btnDownload.disabled = true;
+    btnDownload.innerHTML = '<span>⏳ 엑셀 생성 중...</span>';
+  }
+
+  try {
+    const jsonStr = JSON.stringify({
+      file_summary: data.file_summary || [],
+      errors: data.errors || [],
+      rule_stats: data.rule_stats || {}
+    });
+
+    let bodyData = jsonStr;
+    const headers = { 'Content-Type': 'application/json' };
+
+    // 대용량(1MB 이상)인 경우 브라우저 내장 gzip 압축으로 4.5MB 요청 제한 방지
+    if (jsonStr.length > 1024 * 1024 && typeof CompressionStream !== 'undefined') {
+      const stream = new Blob([jsonStr]).stream().pipeThrough(new CompressionStream('gzip'));
+      bodyData = await new Response(stream).blob();
+      headers['Content-Encoding'] = 'gzip';
+    }
+
+    const res = await fetch('/api/generate-report', {
+      method: 'POST',
+      headers,
+      body: bodyData
+    });
+
+    if (!res.ok) {
+      const errJson = await parseJsonResponseSafely(res);
+      throw new Error(errJson.error || '엑셀 리포트 생성에 실패했습니다.');
+    }
+
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = data.report_filename || '오류_검수_결과.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  } catch (err) {
+    console.error('리포트 다운로드 오류:', err);
+    alert(`엑셀 리포트 다운로드 중 오류가 발생했습니다:\n${err.message}`);
+  } finally {
+    if (btnDownload) {
+      btnDownload.disabled = false;
+      btnDownload.innerHTML = originalHtml;
+    }
+  }
+}
+
+/**
+ * 웹 파일 업로드 검수 실행 (대량 파일 자동 분할 배치 처리)
  */
 async function executeUploadInspection() {
   const btnStart = document.getElementById('btnStartInspection');
@@ -277,32 +390,96 @@ async function executeUploadInspection() {
   const statusPill = document.querySelector('.status-indicator');
   const statusText = document.getElementById('systemStatusText');
 
+  const totalFiles = selectedFiles.length;
+  const batches = splitFilesIntoBatches(selectedFiles);
+
   btnStart.disabled = true;
   btnStart.classList.add('loading');
   progressWrap.style.display = 'block';
-  progressMsg.innerText = `선택된 ${selectedFiles.length}개 엑셀 파일을 업로드하고 정밀 검수를 진행 중입니다...`;
-  progressPercent.innerText = '분석 중';
-  progressBarFill.style.width = '70%';
+  progressMsg.innerText = `총 ${totalFiles.toLocaleString()}개 파일을 ${batches.length}개 배치로 나누어 정밀 검수를 시작합니다...`;
+  progressPercent.innerText = '0%';
+  progressBarFill.style.width = '2%';
 
   statusPill.classList.add('busy');
-  statusText.innerText = '파일 업로드 및 검수 중...';
+  statusText.innerText = `대용량 검수 중 (0 / ${totalFiles.toLocaleString()})`;
 
-  const formData = new FormData();
-  for (let i = 0; i < selectedFiles.length; i++) {
-    formData.append('files', selectedFiles[i]);
-  }
+  const mergedFileSummary = [];
+  const mergedErrors = [];
+  const mergedRuleStats = {};
+  let completedFiles = 0;
+  let totalPassFiles = 0;
+  let totalErrorFiles = 0;
 
   try {
-    const res = await fetch('/api/upload-and-inspect', {
-      method: 'POST',
-      body: formData
-    });
-    const result = await res.json();
-    if (!res.ok || !result.success) {
-      throw new Error(result.error || '검수 중 오류가 발생했습니다.');
+    // 동시성 2로 안정적 병렬 배치 전송 (서버리스 부하 방지 및 속도 최적화)
+    const concurrency = Math.min(2, batches.length);
+    let nextBatchIdx = 0;
+
+    async function runWorker() {
+      while (nextBatchIdx < batches.length) {
+        const currentIdx = nextBatchIdx++;
+        const batchFiles = batches[currentIdx];
+        const formData = new FormData();
+        for (let i = 0; i < batchFiles.length; i++) {
+          formData.append('files', batchFiles[i]);
+        }
+
+        const res = await fetch('/api/inspect-batch', {
+          method: 'POST',
+          body: formData
+        });
+        const result = await parseJsonResponseSafely(res);
+        if (!res.ok || !result.success) {
+          throw new Error(result.error || `배치 ${currentIdx + 1} 검수 중 오류가 발생했습니다.`);
+        }
+
+        const batchData = result.data;
+        if (Array.isArray(batchData.file_summary)) {
+          mergedFileSummary.push(...batchData.file_summary);
+        }
+        if (Array.isArray(batchData.errors)) {
+          mergedErrors.push(...batchData.errors);
+        }
+        if (batchData.rule_stats) {
+          for (const [ruleName, cnt] of Object.entries(batchData.rule_stats)) {
+            mergedRuleStats[ruleName] = (mergedRuleStats[ruleName] || 0) + cnt;
+          }
+        }
+
+        totalPassFiles += batchData.pass_files || 0;
+        totalErrorFiles += batchData.error_files || 0;
+        completedFiles += batchFiles.length;
+
+        const pct = Math.min(99, Math.round((completedFiles / totalFiles) * 100));
+        progressBarFill.style.width = `${pct}%`;
+        progressPercent.innerText = `${pct}%`;
+        progressMsg.innerText = `검수 진행 중: ${completedFiles.toLocaleString()} / ${totalFiles.toLocaleString()}개 파일 완료 (${currentIdx + 1}/${batches.length} 배치)`;
+        statusText.innerText = `검수 중 (${completedFiles.toLocaleString()} / ${totalFiles.toLocaleString()})`;
+      }
     }
 
-    onInspectionSuccess(result.data);
+    const workers = [];
+    for (let w = 0; w < concurrency; w++) {
+      workers.push(runWorker());
+    }
+    await Promise.all(workers);
+
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
+    onInspectionSuccess({
+      is_batch_result: true,
+      report_filename: `오류_검수_결과_${ts}.xlsx`,
+      output_dir: '',
+      total_files: completedFiles,
+      pass_files: totalPassFiles,
+      error_files: totalErrorFiles,
+      total_errors: mergedErrors.length,
+      file_summary: mergedFileSummary,
+      rule_stats: mergedRuleStats,
+      errors: mergedErrors
+    });
   } catch (err) {
     onInspectionError(err);
   } finally {
@@ -454,12 +631,13 @@ function renderRuleStats(ruleStats, totalErrors) {
 }
 
 /**
- * 표본점별 요약 테이블 렌더링
+ * 표본점별 요약 테이블 렌더링 (DocumentFragment로 대량 행 렌더링 최적화)
  */
 function renderSampleTable(fileSummary) {
   const tbody = document.getElementById('sampleSummaryBody');
   tbody.innerHTML = '';
 
+  const fragment = document.createDocumentFragment();
   (fileSummary || []).forEach((item, idx) => {
     const tr = document.createElement('tr');
     const isError = item.오류건수 > 0;
@@ -476,8 +654,9 @@ function renderSampleTable(fileSummary) {
       <td class="cell-right" style="font-weight: 600; color: ${isError ? '#dc2626' : '#059669'};">${item.오류건수}</td>
       <td class="cell-center cell-badge">${statusBadge}</td>
     `;
-    tbody.appendChild(tr);
+    fragment.appendChild(tr);
   });
+  tbody.appendChild(fragment);
 }
 
 /**
@@ -512,6 +691,7 @@ function renderErrorTable(errors) {
     return;
   }
 
+  const fragment = document.createDocumentFragment();
   errors.forEach((err, idx) => {
     const tr = document.createElement('tr');
     tr.dataset.sheet = err.시트명 || '';
@@ -529,8 +709,9 @@ function renderErrorTable(errors) {
       <td style="font-size: 13px; color: #1e293b;">${escapeHtml(err.오류내용)}</td>
       <td class="cell-code" style="color: #b91c1c;">${escapeHtml(String(err.입력값_상세))}</td>
     `;
-    tbody.appendChild(tr);
+    fragment.appendChild(tr);
   });
+  tbody.appendChild(fragment);
 }
 
 /**
