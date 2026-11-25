@@ -35,7 +35,7 @@ import excel_inspector
 
 # 기본 작업 디렉터리 설정 (프로젝트 루트)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-REF_EXCEL_FILE = os.path.join(BASE_DIR, "2026 도시 조사결과표(한성안).xlsx")
+REF_EXCEL_FILE = os.path.join(BASE_DIR, "2026 도시 조사결과표 통합_최종.xlsx")
 
 # Vercel 환경 감지 (VERCEL 환경변수가 있으면 클라우드 환경)
 IS_VERCEL = bool(os.environ.get('VERCEL') or os.environ.get('NOW_REGION'))

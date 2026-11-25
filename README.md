@@ -56,4 +56,4 @@ python analyze_errors.py
 - `analyze_errors.py`: 단독 실행용 오류 분석 스크립트
 - `templates/`: 대시보드 웹 템플릿 (`index.html`)
 - `static/`: 대시보드 UI 스타일(`style.css`) 및 인터랙션 스크립트(`app.js`)
-- `2026 도시 조사결과표(한성안).xlsx`: 기준 표본점 대조용 마스터 파일
+- `2026 도시 조사결과표 통합_최종.xlsx`: 기준 표본점 대조용 마스터 파일

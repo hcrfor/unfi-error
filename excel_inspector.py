@@ -4,7 +4,7 @@
 파일명: excel_inspector.py
 작성자: Antigravity (시니어 풀스택 개발자)
 설명:
-    - 2026 도시 조사결과표(한성안).xlsx 기준 데이터를 참조하여
+    - 2026 도시 조사결과표 통합_최종.xlsx 기준 데이터를 참조하여
     - 사용자가 지정한 폴더 내의 조사 엑셀 파일들을 검수하고
     - 상세 오류 리포트 엑셀 파일을 생성합니다.
 """
@@ -225,12 +225,12 @@ def is_vine_species(val):
 
 
 # =============================================================================
-# 2. 기준 엑셀 데이터 로더 (2026 도시 조사결과표(한성안).xlsx)
+# 2. 기준 엑셀 데이터 로더 (2026 도시 조사결과표 통합_최종.xlsx)
 # =============================================================================
 
 class ReferenceDataLoader:
     """
-    '2026 도시 조사결과표(한성안).xlsx' 파일의 '표본점목록' 탭 데이터를 메모리에 캐싱하여
+    '2026 도시 조사결과표 통합_최종.xlsx' 파일의 '표본점목록' 탭 데이터를 메모리에 캐싱하여
     초고속 대조를 가능하게 해주는 로더 클래스입니다.
     """
     def __init__(self, ref_file_path):
@@ -331,7 +331,7 @@ class ReferenceDataLoader:
 _REF_LOADER_CACHE = {}
 
 
-def get_cached_ref_loader(ref_file="2026 도시 조사결과표(한성안).xlsx"):
+def get_cached_ref_loader(ref_file="2026 도시 조사결과표 통합_최종.xlsx"):
     """
     기준 엑셀 파일 로더를 메모리에 캐싱하여 반환합니다.
     (대량 배치 검수 시 매 요청마다 기준 파일을 다시 파싱하는 오버헤드를 제거합니다.)
@@ -511,7 +511,7 @@ class SurveyInspector:
                         sample_no=sample_no, fname=fname, sheet="일반·토지현황조사표", row_no=2,
                         rule_name="[일반토지 1] 좌표 오차 검증",
                         error_field="표본점번호 대조",
-                        message=f"기준 조사결과표(한성안)의 표본점목록에 해당 표본점번호({sample_no})가 없습니다.",
+                        message=f"기준 조사결과표(통합_최종)의 표본점목록에 해당 표본점번호({sample_no})가 없습니다.",
                         detail_val=sample_no
                     )
                 else:
@@ -1651,7 +1651,7 @@ def build_excel_report_bytes(file_summary, errors, rule_stats):
     return buf
 
 
-def inspect_files_batch(file_paths, ref_file="2026 도시 조사결과표(한성안).xlsx"):
+def inspect_files_batch(file_paths, ref_file="2026 도시 조사결과표 통합_최종.xlsx"):
     """
     전달받은 파일 경로 목록만 빠르게 검수하여 JSON 직렬화 가능한 결과를 반환합니다.
     (대용량 분할 업로드/배치 검수 전용)
@@ -1677,7 +1677,7 @@ def inspect_files_batch(file_paths, ref_file="2026 도시 조사결과표(한성
 # 5. 메인 일괄 검수 실행 함수 (웹 앱 및 CLI 공용)
 # =============================================================
 
-def run_inspection(target_dir, ref_file="2026 도시 조사결과표(한성안).xlsx", output_dir=None, progress_callback=None):
+def run_inspection(target_dir, ref_file="2026 도시 조사결과표 통합_최종.xlsx", output_dir=None, progress_callback=None):
     """
     지정된 디렉터리의 엑셀 파일들을 일괄 검수하고 결과 엑셀 파일을 다운로드 폴더에 생성합니다.
     """
